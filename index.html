@@ -75,6 +75,24 @@
     color: var(--muted);
   }
   .check input { width: 16px; height: 16px; accent-color: var(--accent-strong); cursor: pointer; }
+  .section-panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin: 0 0 18px;
+  }
+  .section-panel[hidden] { display: none; }
+  .section-title {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .section-list { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+  .section-list .check { color: var(--text); }
   .grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -149,6 +167,11 @@
     </label>
   </div>
 
+  <div class="section-panel" id="sectionPanel" hidden>
+    <div class="section-title" id="sectionTitle"></div>
+    <div class="section-list" id="sectionList"></div>
+  </div>
+
   <div class="grid">
     <div class="col">
       <div class="col-head">
@@ -193,6 +216,45 @@
   // Kartenzeile: beginnt mit Anzahl, optional "x" (1x), dann Name
   var CARD_LINE = /^\s*(\d+)\s*[xX]?\s+(.+?)\s*$/;
 
+  // Bekannte Abschnitts-Überschriften. removable=false bedeutet: darf nie als
+  // ganzer Block (mit Karten) entfernt werden (Maindeck bzw. Commander).
+  var SECTION_DEFS = [
+    { key: "deck",        name: "Deck",        re: /^deck$/i,          removable: false },
+    { key: "commander",   name: "Commander",   re: /^commanders?$/i,   removable: false },
+    { key: "companion",   name: "Companion",   re: /^companion$/i,     removable: true  },
+    { key: "sideboard",   name: "Sideboard",   re: /^sideboard$/i,     removable: true  },
+    { key: "maybeboard",  name: "Maybeboard",  re: /^maybe(?:board)?$/i, removable: true },
+    { key: "considering", name: "Considering", re: /^considering$/i,   removable: true  },
+    { key: "tokens",      name: "Tokens",      re: /^tokens?$/i,       removable: true  },
+    { key: "about",       name: "About",       re: /^about$/i,         removable: true  }
+  ];
+
+  // Erkennt eine Abschnitts-Überschrift. Toleriert Zusätze wie "Sideboard (15)"
+  // oder "Commander:". Gibt {key,name,removable} oder null zurück.
+  function sectionKey(line) {
+    var norm = String(line).trim().replace(/\s*\(.*\)\s*$/, "").replace(/:\s*$/, "").trim();
+    if (!norm) return null;
+    for (var i = 0; i < SECTION_DEFS.length; i++) {
+      if (SECTION_DEFS[i].re.test(norm)) return SECTION_DEFS[i];
+    }
+    return null;
+  }
+
+  // Geordnete, eindeutige Liste der in der Liste vorkommenden Abschnitte.
+  function detectSections(text) {
+    var lines = String(text).replace(/\r\n?/g, "\n").split("\n");
+    var seen = {};
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+      var s = sectionKey(lines[i]);
+      if (s && !seen[s.key]) {
+        seen[s.key] = true;
+        out.push({ key: s.key, name: s.name, removable: s.removable });
+      }
+    }
+    return out;
+  }
+
   function fixLine(line) {
     var m = line.match(CARD_LINE);
     if (!m) return null; // keine Kartenzeile
@@ -209,12 +271,36 @@
     return qty + " " + rest;
   }
 
-  function fixDecklist(text, keepSections) {
+  // opts: { keepSections: bool, removeSections: [keys] }
+  // Rückwärtskompatibel: ein Boolean wird als {keepSections: bool} gelesen.
+  function fixDecklist(text, opts) {
+    if (typeof opts === "boolean" || opts == null) opts = { keepSections: !!opts };
+    var keepSections = !!opts.keepSections;
+    var removeList = opts.removeSections || [];
+    var removeSet = {};
+    for (var r = 0; r < removeList.length; r++) removeSet[removeList[r]] = true;
+
     var lines = String(text).replace(/\r\n?/g, "\n").split("\n");
     var out = [];
+    var skipping = false; // innerhalb eines komplett zu entfernenden Abschnitts
     for (var i = 0; i < lines.length; i++) {
       var raw = lines[i];
       var trimmed = raw.trim();
+
+      var sec = trimmed === "" ? null : sectionKey(trimmed);
+      if (sec) {
+        // Abschnitts-Überschrift steuert, ob der folgende Block übersprungen wird.
+        if (removeSet[sec.key]) {
+          skipping = true;
+          continue; // Überschrift verwerfen
+        }
+        skipping = false;
+        if (keepSections) out.push(trimmed);
+        continue;
+      }
+
+      if (skipping) continue; // Zeilen des entfernten Abschnitts fallen weg
+
       if (trimmed === "") {
         // Leerzeilen nur behalten, wenn Überschriften behalten werden;
         // sonst nicht zwei leere hintereinander erzeugen.
@@ -229,7 +315,7 @@
       } else if (keepSections) {
         out.push(trimmed);
       }
-      // sonst: Überschrift/sonstige Zeile verwerfen
+      // sonst: sonstige Zeile (z. B. Deckname) verwerfen
     }
     // trailing Leerzeilen abschneiden
     while (out.length && out[out.length - 1] === "") out.pop();
@@ -246,7 +332,13 @@
     return n;
   }
 
-  var api = { fixDecklist: fixDecklist, fixLine: fixLine, countCards: countCards };
+  var api = {
+    fixDecklist: fixDecklist,
+    fixLine: fixLine,
+    countCards: countCards,
+    detectSections: detectSections,
+    sectionKey: sectionKey
+  };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.DecklistFixer = api;
 })(typeof window !== "undefined" ? window : this);
@@ -263,6 +355,15 @@
   var outCount = document.getElementById("outCount");
   var copyBtn = document.getElementById("copyBtn");
   var toast = document.getElementById("toast");
+  var sectionPanel = document.getElementById("sectionPanel");
+  var sectionTitle = document.getElementById("sectionTitle");
+  var sectionList = document.getElementById("sectionList");
+
+  // Merkt sich pro Abschnitts-Key, ob "komplett entfernen" angehakt ist.
+  var removeState = {};
+  // Signatur der zuletzt gerenderten entfernbaren Abschnitte (key-Reihenfolge),
+  // damit das Panel nicht bei jedem Tastendruck neu aufgebaut wird.
+  var lastSig = null;
 
   // Beispielblock im Eingabe-Placeholder ist sprachneutral (MTG-Export-Format).
   var EXAMPLE =
@@ -281,7 +382,9 @@
       copy: "Ergebnis kopieren",
       copied: "Kopiert!",
       footer: "Läuft komplett offline im Browser · funktioniert auch als lokale Datei",
-      cards: function (n) { return n + (n === 1 ? " Karte" : " Karten"); }
+      cards: function (n) { return n + (n === 1 ? " Karte" : " Karten"); },
+      panelTitle: "Erkannte Abschnitte",
+      removeWhole: function (name) { return name + " komplett entfernen (mit Karten)"; }
     },
     en: {
       sub: 'Removes set code and collector number from a decklist — ' +
@@ -294,7 +397,9 @@
       copy: "Copy result",
       copied: "Copied!",
       footer: "Runs entirely offline in your browser · also works as a local file",
-      cards: function (n) { return n + (n === 1 ? " card" : " cards"); }
+      cards: function (n) { return n + (n === 1 ? " card" : " cards"); },
+      panelTitle: "Detected sections",
+      removeWhole: function (name) { return "Remove entire " + name + " (with cards)"; }
     },
     fr: {
       sub: "Supprime le code d'extension et le numéro de collection d'une decklist — " +
@@ -308,7 +413,9 @@
       copied: "Copié !",
       footer: "Fonctionne entièrement hors ligne dans le navigateur · marche aussi en fichier local",
       // En français, 0 et 1 prennent le singulier.
-      cards: function (n) { return n + (n <= 1 ? " carte" : " cartes"); }
+      cards: function (n) { return n + (n <= 1 ? " carte" : " cartes"); },
+      panelTitle: "Sections détectées",
+      removeWhole: function (name) { return "Supprimer tout le " + name + " (cartes incluses)"; }
     }
   };
 
@@ -340,12 +447,63 @@
       btns[i].classList.toggle("active", btns[i].getAttribute("data-lang") === lang);
     }
     try { localStorage.setItem("dlf-lang", lang); } catch (e) {}
+    renderPanel(true); // Panel-Labels in neuer Sprache neu aufbauen
     render();
+  }
+
+  // Baut das Panel mit "komplett entfernen"-Häkchen für die erkannten,
+  // entfernbaren Abschnitte. force=true erzwingt Neuaufbau (z. B. Sprachwechsel).
+  function renderPanel(force) {
+    var t = I18N[lang];
+    var removable = F.detectSections(input.value).filter(function (s) {
+      return s.removable;
+    });
+    var sig = lang + "|" + removable.map(function (s) { return s.key; }).join(",");
+    if (!force && sig === lastSig) return;
+    lastSig = sig;
+
+    sectionTitle.textContent = t.panelTitle;
+    sectionList.innerHTML = "";
+    if (!removable.length) {
+      sectionPanel.hidden = true;
+      return;
+    }
+    sectionPanel.hidden = false;
+    removable.forEach(function (s) {
+      var label = document.createElement("label");
+      label.className = "check";
+      var cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = !!removeState[s.key];
+      cb.setAttribute("data-key", s.key);
+      cb.addEventListener("change", function () {
+        removeState[s.key] = cb.checked;
+        render();
+      });
+      var span = document.createElement("span");
+      span.textContent = t.removeWhole(s.name);
+      label.appendChild(cb);
+      label.appendChild(span);
+      sectionList.appendChild(label);
+    });
   }
 
   function render() {
     var t = I18N[lang];
-    var result = F.fixDecklist(input.value, keep.checked);
+    renderPanel(false);
+    // Nur Keys entfernen, die aktuell auch erkannt werden.
+    var present = {};
+    F.detectSections(input.value).forEach(function (s) {
+      if (s.removable) present[s.key] = true;
+    });
+    var removeSections = [];
+    for (var k in removeState) {
+      if (removeState[k] && present[k]) removeSections.push(k);
+    }
+    var result = F.fixDecklist(input.value, {
+      keepSections: keep.checked,
+      removeSections: removeSections
+    });
     output.value = result;
     inCount.textContent = t.cards(F.countCards(input.value));
     outCount.textContent = t.cards(F.countCards(result));

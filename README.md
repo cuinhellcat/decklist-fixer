@@ -31,6 +31,10 @@ kopieren. Nichts wird hochgeladen — alles läuft im Browser.
 - Wandelt `2x Sol Ring` → `2 Sol Ring`
 - Checkbox: Abschnitts-Überschriften (Deck, Sideboard, Commander …) behalten
   oder entfernen
+- Erkennt vorhandene Abschnitte automatisch und blendet je Abschnitt eine
+  Option ein, den **ganzen Block inklusive Karten** zu entfernen (z. B.
+  Sideboard, Maybeboard). Deck (Maindeck) und Commander bleiben immer erhalten.
+- Oberfläche auf Deutsch, Englisch und Französisch (mit Spracherkennung)
 - Zählt Karten in Ein- und Ausgabe
 - Funktioniert auch offline als lokale Datei (`index.html` doppelklicken)
 
