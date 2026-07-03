@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Decklist Fixer</title>
+<style>
+  :root {
+    --bg: #14161a;
+    --panel: #1d2027;
+    --panel2: #23272f;
+    --border: #333844;
+    --text: #e6e8ec;
+    --muted: #9aa1ad;
+    --accent: #6ea8fe;
+    --accent-strong: #4b8dfd;
+    --ok: #4caf7d;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 24px 16px 48px;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; }
+  header { margin-bottom: 20px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  .sub { color: var(--muted); margin: 0; }
+  .sub code {
+    background: var(--panel2);
+    padding: 1px 6px;
+    border-radius: 5px;
+    color: var(--text);
+    font-size: 13px;
+  }
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 16px;
+    margin: 18px 0;
+  }
+  .check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    user-select: none;
+    color: var(--muted);
+  }
+  .check input { width: 16px; height: 16px; accent-color: var(--accent-strong); cursor: pointer; }
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+  .col { display: flex; flex-direction: column; }
+  .col-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+  .col-head label { font-weight: 600; }
+  .count { color: var(--muted); font-size: 12px; }
+  textarea {
+    width: 100%;
+    min-height: 380px;
+    resize: vertical;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font: 13px/1.55 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    tab-size: 4;
+  }
+  textarea:focus { outline: none; border-color: var(--accent); }
+  textarea[readonly] { background: var(--panel2); }
+  .btnrow { margin-top: 10px; display: flex; gap: 10px; align-items: center; }
+  button {
+    background: var(--accent-strong);
+    color: #fff;
+    border: none;
+    border-radius: 9px;
+    padding: 9px 18px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:hover { background: var(--accent); }
+  button.ghost {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+  }
+  button.ghost:hover { color: var(--text); border-color: var(--accent); }
+  .toast { color: var(--ok); font-size: 13px; opacity: 0; transition: opacity .15s; }
+  .toast.show { opacity: 1; }
+  footer { margin-top: 28px; color: var(--muted); font-size: 12px; }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🃏 Decklist Fixer</h1>
+    <p class="sub">Entfernt Set-Code und Kartennummer aus einer Deckliste — aus
+      <code>1 Island (J25) 85</code> wird <code>1 Island</code>. Alles bleibt im Browser.</p>
+  </header>
+
+  <div class="controls">
+    <label class="check">
+      <input type="checkbox" id="keepSections" checked>
+      Abschnitts-Überschriften behalten (Deck, Sideboard, Commander …)
+    </label>
+  </div>
+
+  <div class="grid">
+    <div class="col">
+      <div class="col-head">
+        <label for="input">Eingabe</label>
+        <span class="count" id="inCount">0 Karten</span>
+      </div>
+      <textarea id="input" spellcheck="false" placeholder="Deckliste hier einfügen …
+
+Deck
+1 Island (J25) 85
+4 Lightning Bolt (STA) 42
+2x Sol Ring (LTC) 284
+
+Sideboard
+1 Fable of the Mirror-Breaker (NEO) 141"></textarea>
+    </div>
+
+    <div class="col">
+      <div class="col-head">
+        <label for="output">Ausgabe</label>
+        <span class="count" id="outCount">0 Karten</span>
+      </div>
+      <textarea id="output" readonly spellcheck="false" placeholder="… erscheint hier automatisch"></textarea>
+      <div class="btnrow">
+        <button id="copyBtn">Ergebnis kopieren</button>
+        <span class="toast" id="toast">Kopiert!</span>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    Läuft komplett offline im Browser · funktioniert auch als lokale Datei ·
+    <a href="https://github.com" id="repoLink" style="display:none"></a>
+  </footer>
+</div>
+
+<script>
+/*
+ * Pure Parsing-Logik. Bewusst als eigenständige Funktion gehalten, damit sie
+ * unverändert von einem Node-Testskript oder z. B. einem Discord-Bot
+ * wiederverwendet werden kann (via `module.exports` unten).
+ */
+(function (root) {
+  // Am Zeilenende: Set-Code in Klammern + Kartennummer, z. B. " (J25) 85"
+  var SET_AND_NUMBER = /\s*\([A-Za-z0-9]{2,6}\)\s+[A-Za-z0-9★†.\-]+\s*$/;
+  // Foil-/Etch-Marker sowie freistehender Set-Code ohne Nummer
+  var FOIL = /\s*\*[FE]\*/gi;
+  var SET_ONLY = /\s*\([A-Za-z0-9]{2,6}\)\s*$/;
+  // Moxfield-artige Tags am Ende: "#tag" bis Zeilenende
+  var MOX_TAGS = /\s*(?:#\S+\s*)+$/;
+  // Kartenzeile: beginnt mit Anzahl, optional "x" (1x), dann Name
+  var CARD_LINE = /^\s*(\d+)\s*[xX]?\s+(.+?)\s*$/;
+
+  function fixLine(line) {
+    var m = line.match(CARD_LINE);
+    if (!m) return null; // keine Kartenzeile
+    var qty = m[1];
+    var rest = m[2];
+    // Reihenfolge wichtig: trailing Marker (Foil, Tags) zuerst weg, damit
+    // der am Zeilenende verankerte Set-Code-Regex danach greift.
+    rest = rest.replace(FOIL, "");
+    rest = rest.replace(MOX_TAGS, "");
+    rest = rest.replace(SET_AND_NUMBER, "");
+    rest = rest.replace(SET_ONLY, "");
+    rest = rest.trim();
+    if (!rest) return null;
+    return qty + " " + rest;
+  }
+
+  function fixDecklist(text, keepSections) {
+    var lines = String(text).replace(/\r\n?/g, "\n").split("\n");
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+      var raw = lines[i];
+      var trimmed = raw.trim();
+      if (trimmed === "") {
+        // Leerzeilen nur behalten, wenn Überschriften behalten werden;
+        // sonst nicht zwei leere hintereinander erzeugen.
+        if (keepSections) {
+          if (out.length && out[out.length - 1] !== "") out.push("");
+        }
+        continue;
+      }
+      var fixed = fixLine(raw);
+      if (fixed !== null) {
+        out.push(fixed);
+      } else if (keepSections) {
+        out.push(trimmed);
+      }
+      // sonst: Überschrift/sonstige Zeile verwerfen
+    }
+    // trailing Leerzeilen abschneiden
+    while (out.length && out[out.length - 1] === "") out.pop();
+    return out.join("\n");
+  }
+
+  function countCards(text) {
+    var lines = String(text).split("\n");
+    var n = 0;
+    for (var i = 0; i < lines.length; i++) {
+      var m = lines[i].match(CARD_LINE);
+      if (m) n += parseInt(m[1], 10) || 0;
+    }
+    return n;
+  }
+
+  var api = { fixDecklist: fixDecklist, fixLine: fixLine, countCards: countCards };
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  else root.DecklistFixer = api;
+})(typeof window !== "undefined" ? window : this);
+</script>
+
+<script>
+(function () {
+  if (typeof document === "undefined") return;
+  var F = window.DecklistFixer;
+  var input = document.getElementById("input");
+  var output = document.getElementById("output");
+  var keep = document.getElementById("keepSections");
+  var inCount = document.getElementById("inCount");
+  var outCount = document.getElementById("outCount");
+  var copyBtn = document.getElementById("copyBtn");
+  var toast = document.getElementById("toast");
+
+  function plural(n) { return n + (n === 1 ? " Karte" : " Karten"); }
+
+  function render() {
+    var result = F.fixDecklist(input.value, keep.checked);
+    output.value = result;
+    inCount.textContent = plural(F.countCards(input.value));
+    outCount.textContent = plural(F.countCards(result));
+  }
+
+  input.addEventListener("input", render);
+  keep.addEventListener("change", render);
+
+  copyBtn.addEventListener("click", function () {
+    var text = output.value;
+    function done() {
+      toast.classList.add("show");
+      setTimeout(function () { toast.classList.remove("show"); }, 1400);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, fallback);
+    } else {
+      fallback();
+    }
+    function fallback() {
+      output.removeAttribute("readonly");
+      output.select();
+      try { document.execCommand("copy"); } catch (e) {}
+      output.setAttribute("readonly", "readonly");
+      window.getSelection().removeAllRanges();
+      done();
+    }
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
