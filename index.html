@@ -26,7 +26,31 @@
   }
   .wrap { max-width: 960px; margin: 0 auto; }
   header { margin-bottom: 20px; }
+  .topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
   h1 { font-size: 26px; margin: 0 0 6px; }
+  .langs { display: flex; gap: 6px; flex-shrink: 0; }
+  .langbtn {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 5px 11px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .langbtn:hover { color: var(--text); border-color: var(--accent); }
+  .langbtn.active {
+    background: var(--accent-strong);
+    color: #fff;
+    border-color: var(--accent-strong);
+  }
   .sub { color: var(--muted); margin: 0; }
   .sub code {
     background: var(--panel2);
@@ -107,41 +131,39 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>🃏 Decklist Fixer</h1>
-    <p class="sub">Entfernt Set-Code und Kartennummer aus einer Deckliste — aus
-      <code>1 Island (J25) 85</code> wird <code>1 Island</code>. Alles bleibt im Browser.</p>
+    <div class="topbar">
+      <h1>🃏 Decklist Fixer</h1>
+      <div class="langs" id="langs">
+        <button class="langbtn" data-lang="de">DE</button>
+        <button class="langbtn" data-lang="en">EN</button>
+        <button class="langbtn" data-lang="fr">FR</button>
+      </div>
+    </div>
+    <p class="sub" id="sub"></p>
   </header>
 
   <div class="controls">
     <label class="check">
       <input type="checkbox" id="keepSections" checked>
-      Abschnitts-Überschriften behalten (Deck, Sideboard, Commander …)
+      <span id="keepLabel"></span>
     </label>
   </div>
 
   <div class="grid">
     <div class="col">
       <div class="col-head">
-        <label for="input">Eingabe</label>
-        <span class="count" id="inCount">0 Karten</span>
+        <label for="input" id="inputLabel">Eingabe</label>
+        <span class="count" id="inCount"></span>
       </div>
-      <textarea id="input" spellcheck="false" placeholder="Deckliste hier einfügen …
-
-Deck
-1 Island (J25) 85
-4 Lightning Bolt (STA) 42
-2x Sol Ring (LTC) 284
-
-Sideboard
-1 Fable of the Mirror-Breaker (NEO) 141"></textarea>
+      <textarea id="input" spellcheck="false"></textarea>
     </div>
 
     <div class="col">
       <div class="col-head">
-        <label for="output">Ausgabe</label>
-        <span class="count" id="outCount">0 Karten</span>
+        <label for="output" id="outputLabel">Ausgabe</label>
+        <span class="count" id="outCount"></span>
       </div>
-      <textarea id="output" readonly spellcheck="false" placeholder="… erscheint hier automatisch"></textarea>
+      <textarea id="output" readonly spellcheck="false"></textarea>
       <div class="btnrow">
         <button id="copyBtn">Ergebnis kopieren</button>
         <span class="toast" id="toast">Kopiert!</span>
@@ -150,8 +172,7 @@ Sideboard
   </div>
 
   <footer>
-    Läuft komplett offline im Browser · funktioniert auch als lokale Datei ·
-    <a href="https://github.com" id="repoLink" style="display:none"></a>
+    <span id="footerText"></span>
   </footer>
 </div>
 
@@ -243,17 +264,100 @@ Sideboard
   var copyBtn = document.getElementById("copyBtn");
   var toast = document.getElementById("toast");
 
-  function plural(n) { return n + (n === 1 ? " Karte" : " Karten"); }
+  // Beispielblock im Eingabe-Placeholder ist sprachneutral (MTG-Export-Format).
+  var EXAMPLE =
+    "\n\nDeck\n1 Island (J25) 85\n4 Lightning Bolt (STA) 42\n" +
+    "2x Sol Ring (LTC) 284\n\nSideboard\n1 Fable of the Mirror-Breaker (NEO) 141";
+
+  var I18N = {
+    de: {
+      sub: 'Entfernt Set-Code und Kartennummer aus einer Deckliste — aus ' +
+        '<code>1 Island (J25) 85</code> wird <code>1 Island</code>. Alles bleibt im Browser.',
+      keep: "Abschnitts-Überschriften behalten (Deck, Sideboard, Commander …)",
+      inputLabel: "Eingabe",
+      outputLabel: "Ausgabe",
+      inputLead: "Deckliste hier einfügen …",
+      outputPh: "… erscheint hier automatisch",
+      copy: "Ergebnis kopieren",
+      copied: "Kopiert!",
+      footer: "Läuft komplett offline im Browser · funktioniert auch als lokale Datei",
+      cards: function (n) { return n + (n === 1 ? " Karte" : " Karten"); }
+    },
+    en: {
+      sub: 'Removes set code and collector number from a decklist — ' +
+        '<code>1 Island (J25) 85</code> becomes <code>1 Island</code>. Everything stays in your browser.',
+      keep: "Keep section headers (Deck, Sideboard, Commander …)",
+      inputLabel: "Input",
+      outputLabel: "Output",
+      inputLead: "Paste your decklist here …",
+      outputPh: "… appears here automatically",
+      copy: "Copy result",
+      copied: "Copied!",
+      footer: "Runs entirely offline in your browser · also works as a local file",
+      cards: function (n) { return n + (n === 1 ? " card" : " cards"); }
+    },
+    fr: {
+      sub: "Supprime le code d'extension et le numéro de collection d'une decklist — " +
+        "<code>1 Island (J25) 85</code> devient <code>1 Island</code>. Tout reste dans votre navigateur.",
+      keep: "Conserver les en-têtes de section (Deck, Sideboard, Commander …)",
+      inputLabel: "Entrée",
+      outputLabel: "Sortie",
+      inputLead: "Collez votre decklist ici …",
+      outputPh: "… apparaît ici automatiquement",
+      copy: "Copier le résultat",
+      copied: "Copié !",
+      footer: "Fonctionne entièrement hors ligne dans le navigateur · marche aussi en fichier local",
+      // En français, 0 et 1 prennent le singulier.
+      cards: function (n) { return n + (n <= 1 ? " carte" : " cartes"); }
+    }
+  };
+
+  var lang = "de";
+
+  function pickInitialLang() {
+    var saved = null;
+    try { saved = localStorage.getItem("dlf-lang"); } catch (e) {}
+    if (saved && I18N[saved]) return saved;
+    var nav = (navigator.language || "en").slice(0, 2).toLowerCase();
+    return I18N[nav] ? nav : "en";
+  }
+
+  function applyLang(next) {
+    lang = I18N[next] ? next : "en";
+    var t = I18N[lang];
+    document.documentElement.lang = lang;
+    document.getElementById("sub").innerHTML = t.sub;
+    document.getElementById("keepLabel").textContent = t.keep;
+    document.getElementById("inputLabel").textContent = t.inputLabel;
+    document.getElementById("outputLabel").textContent = t.outputLabel;
+    input.placeholder = t.inputLead + EXAMPLE;
+    output.placeholder = t.outputPh;
+    copyBtn.textContent = t.copy;
+    toast.textContent = t.copied;
+    document.getElementById("footerText").textContent = t.footer;
+    var btns = document.querySelectorAll(".langbtn");
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].classList.toggle("active", btns[i].getAttribute("data-lang") === lang);
+    }
+    try { localStorage.setItem("dlf-lang", lang); } catch (e) {}
+    render();
+  }
 
   function render() {
+    var t = I18N[lang];
     var result = F.fixDecklist(input.value, keep.checked);
     output.value = result;
-    inCount.textContent = plural(F.countCards(input.value));
-    outCount.textContent = plural(F.countCards(result));
+    inCount.textContent = t.cards(F.countCards(input.value));
+    outCount.textContent = t.cards(F.countCards(result));
   }
 
   input.addEventListener("input", render);
   keep.addEventListener("change", render);
+
+  document.getElementById("langs").addEventListener("click", function (e) {
+    var btn = e.target.closest ? e.target.closest(".langbtn") : null;
+    if (btn) applyLang(btn.getAttribute("data-lang"));
+  });
 
   copyBtn.addEventListener("click", function () {
     var text = output.value;
@@ -276,7 +380,7 @@ Sideboard
     }
   });
 
-  render();
+  applyLang(pickInitialLang());
 })();
 </script>
 </body>
