@@ -44,3 +44,8 @@ Alles steckt in einer einzigen `index.html` (Inline-CSS + Inline-JS, keine
 Abhängigkeiten). Die Parsing-Logik ist als eigenständige Funktion
 `fixDecklist(text, keepSections)` gekapselt, damit sie z. B. von einem
 Discord-Bot wiederverwendet werden kann.
+
+## Lizenz
+
+[MIT](LICENSE) — frei nutzbar, veränderbar und einbaubar (auch in andere
+Projekte/Seiten), solange der Copyright-Hinweis erhalten bleibt.
